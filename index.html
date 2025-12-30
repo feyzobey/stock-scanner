@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Stok Barkod Okuyucu</title>
+  <script src="https://unpkg.com/@zxing/library@latest"></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 10px; }
+    video { width: 100%; border: 1px solid #ccc; }
+    input, select, button { width: 100%; padding: 10px; margin-top: 8px; }
+    .ok { color: green; }
+    .err { color: red; }
+  </style>
+</head>
+<body>
+
+<h2>📦 Stok Giriş / Çıkış</h2>
+
+<video id="video"></video>
+
+<input id="barcode" placeholder="Barkod" readonly />
+
+<select id="action">
+  <option value="IN">IN (Giriş)</option>
+  <option value="OUT">OUT (Çıkış)</option>
+</select>
+
+<select id="movementType">
+  <option>Purchase</option>
+  <option>Sale</option>
+  <option>Shipment</option>
+  <option>Return</option>
+  <option>Adjustment</option>
+</select>
+
+<input id="qty" type="number" value="1" min="1" />
+<input id="location" placeholder="Lokasyon (A1-R01-S01)" />
+
+<button onclick="send()">Kaydet</button>
+
+<p id="result"></p>
+
+<script>
+  const API_URL = "https://script.google.com/macros/s/AKfycbzbglq8iu9FvhzROtOpkTrkg0Lm9OLE0kmnLaDfhQ1ocpdBcjYfahIch46ttoT1KSbFwg/exec";
+  const API_TOKEN = "Ahmet-2025-Stock-Token-9f3b7c1a";
+
+  const codeReader = new ZXing.BrowserBarcodeReader();
+  const videoElement = document.getElementById("video");
+  const barcodeInput = document.getElementById("barcode");
+
+  codeReader.decodeFromVideoDevice(null, videoElement, (result, err) => {
+    if (result) {
+      barcodeInput.value = result.text;
+      navigator.vibrate?.(200);
+    }
+  });
+
+  async function send() {
+    const payload = {
+      action: document.getElementById("action").value,
+      movementType: document.getElementById("movementType").value,
+      barcode: barcodeInput.value,
+      qty: Number(document.getElementById("qty").value),
+      location: document.getElementById("location").value,
+      token: API_TOKEN
+    };
+
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const json = await res.json();
+      document.getElementById("result").innerHTML =
+        json.ok ? "<span class='ok'>✔ Kaydedildi</span>" :
+                  "<span class='err'>❌ Hata</span>";
+    } catch (e) {
+      document.getElementById("result").innerHTML =
+        "<span class='err'>❌ Bağlantı hatası</span>";
+    }
+  }
+</script>
+
+</body>
+</html>
