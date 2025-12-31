@@ -84,7 +84,7 @@
         movementType: document.getElementById("movementType").value,
         barcode: barcodeInput.value,
         qty: Number(document.getElementById("qty").value),
-        location: document.getElementById("location").value,
+        location: document.getElementById("location").value.trim().toUpperCase(),
         token: API_TOKEN
       };
 
