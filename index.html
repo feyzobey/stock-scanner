@@ -9,12 +9,15 @@
   <style>
     body {
       font-family: Arial, sans-serif;
-      padding: 10px;
+      padding: 12px;
+      max-width: 640px;
+      margin: 0 auto;
     }
 
     video {
       width: 100%;
       border: 1px solid #ccc;
+      border-radius: 8px;
     }
 
     input,
@@ -22,15 +25,51 @@
     button {
       width: 100%;
       padding: 10px;
+      margin-top: 10px;
+      font-size: 16px;
+    }
+
+    button {
+      cursor: pointer;
+      border: 0;
+      border-radius: 8px;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .row {
       margin-top: 8px;
     }
 
     .ok {
-      color: green;
+      color: #0a7a2d;
     }
 
     .err {
-      color: red;
+      color: #b00020;
+    }
+
+    .muted {
+      color: #666;
+      font-size: 13px;
+    }
+
+    .card {
+      border: 1px solid #eee;
+      border-radius: 10px;
+      padding: 10px;
+      margin-top: 10px;
+    }
+
+    .k {
+      font-weight: 700;
+    }
+
+    .small {
+      font-size: 14px;
     }
   </style>
 </head>
@@ -39,79 +78,220 @@
 
   <h2>📦 Stok Giriş / Çıkış</h2>
 
-  <video id="video"></video>
+  <video id="video" playsinline></video>
 
-  <input id="barcode" placeholder="Barkod" readonly />
+  <div class="card">
+    <div class="row small"><span class="k">Barkod:</span></div>
+    <input id="barcode" placeholder="Barkod (EAN-13)" readonly />
 
-  <select id="action">
-    <option value="IN">IN (Giriş)</option>
-    <option value="OUT">OUT (Çıkış)</option>
-  </select>
+    <div id="productInfo" class="muted">Ürün: <b>-</b></div>
+    <div id="productHint" class="muted"></div>
+  </div>
 
-  <select id="movementType">
-    <option>Purchase</option>
-    <option>Sale</option>
-    <option>Shipment</option>
-    <option>Return</option>
-    <option>Adjustment</option>
-  </select>
+  <div class="card">
+    <select id="action">
+      <option value="IN">IN (Giriş)</option>
+      <option value="OUT">OUT (Çıkış)</option>
+    </select>
 
-  <input id="qty" type="number" value="1" min="1" />
-  <input id="location" placeholder="Lokasyon (A1-R01-S01)" />
+    <select id="movementType">
+      <option value="Purchase">Purchase</option>
+      <option value="Sale">Sale</option>
+      <option value="Shipment">Shipment</option>
+      <option value="Return">Return</option>
+      <option value="Adjustment">Adjustment</option>
+    </select>
 
-  <button onclick="send()">Kaydet</button>
+    <input id="qty" type="number" value="1" min="1" />
 
-  <p id="result"></p>
+    <select id="locationSelect">
+      <option value="">Lokasyon yükleniyor...</option>
+    </select>
+
+    <input id="refNo" placeholder="Referans No (sipariş/irsaliye) - opsiyonel" />
+    <input id="channel" placeholder="Kanal (Amazon/Woo/Manuel) - opsiyonel" />
+
+    <button id="saveBtn" onclick="send()" disabled>Kaydet</button>
+
+    <p id="result"></p>
+  </div>
 
   <script>
     const API_URL = "https://script.google.com/macros/s/AKfycbzbglq8iu9FvhzROtOpkTrkg0Lm9OLE0kmnLaDfhQ1ocpdBcjYfahIch46ttoT1KSbFwg/exec";
     const API_TOKEN = "Ahmet-2025-Stock-Token-9f3b7c1a";
 
-    const codeReader = new ZXing.BrowserBarcodeReader();
-    const videoElement = document.getElementById("video");
-    const barcodeInput = document.getElementById("barcode");
 
-    codeReader.decodeFromVideoDevice(null, videoElement, (result, err) => {
+    const els = {
+      video: document.getElementById("video"),
+      barcode: document.getElementById("barcode"),
+      productInfo: document.getElementById("productInfo"),
+      productHint: document.getElementById("productHint"),
+      action: document.getElementById("action"),
+      movementType: document.getElementById("movementType"),
+      qty: document.getElementById("qty"),
+      locationSelect: document.getElementById("locationSelect"),
+      refNo: document.getElementById("refNo"),
+      channel: document.getElementById("channel"),
+      saveBtn: document.getElementById("saveBtn"),
+      result: document.getElementById("result"),
+    };
+
+    let lastBarcode = "";
+    let productOk = false;
+
+    function setResult(html) { els.result.innerHTML = html || ""; }
+
+    function normLoc(v) { return (v || "").trim().toUpperCase(); }
+
+    async function apiGet(mode, params = {}) {
+      const u = new URL(API_URL);
+      u.searchParams.set("mode", mode);
+      u.searchParams.set("token", API_TOKEN);
+      Object.entries(params).forEach(([k, v]) => u.searchParams.set(k, v));
+      const res = await fetch(u.toString());
+      return await res.json();
+    }
+
+    async function loadLocations() {
+      try {
+        const json = await apiGet("locations");
+        if (!json.ok) throw new Error(json.error || "locations error");
+
+        const locs = (json.locations || []).map(normLoc).filter(Boolean);
+        els.locationSelect.innerHTML = "";
+
+        if (locs.length === 0) {
+          els.locationSelect.innerHTML = `<option value="">Lokasyon yok (Locations sayfasını doldur)</option>`;
+          return;
+        }
+
+        els.locationSelect.innerHTML = `<option value="">Lokasyon seç</option>` +
+          locs.map(l => `<option value="${l}">${l}</option>`).join("");
+      } catch (e) {
+        els.locationSelect.innerHTML = `<option value="">Lokasyon yüklenemedi</option>`;
+      }
+    }
+
+    function updateSaveButtonState() {
+      const hasBarcode = !!els.barcode.value;
+      const hasLoc = !!els.locationSelect.value;
+      const qtyOk = Number(els.qty.value) > 0;
+      els.saveBtn.disabled = !(hasBarcode && hasLoc && qtyOk && productOk);
+    }
+
+    async function fetchProduct(barcode) {
+      productOk = false;
+      updateSaveButtonState();
+
+      els.productInfo.innerHTML = `Ürün: <b>Kontrol ediliyor...</b>`;
+      els.productHint.textContent = "";
+
+      try {
+        const json = await apiGet("product", { barcode });
+        if (json.ok && json.product) {
+          const p = json.product;
+          productOk = true;
+          els.productInfo.innerHTML = `Ürün: <b>${escapeHtml(p.name || "-")}</b> <span class="muted">(${escapeHtml(p.sku || "")})</span>`;
+          // default location önerisi (boşsa seç)
+          const defLoc = normLoc(p.defaultLocation || "");
+          if (!els.locationSelect.value && defLoc) {
+            const opt = Array.from(els.locationSelect.options).find(o => o.value === defLoc);
+            if (opt) els.locationSelect.value = defLoc;
+          }
+        } else {
+          productOk = false;
+          els.productInfo.innerHTML = `Ürün: <b class="err">Tanımlı değil</b>`;
+          els.productHint.innerHTML = `<span class="err">Bu barkod Products sayfasında yok. Önce ürünü ekleyin.</span>`;
+        }
+      } catch (e) {
+        productOk = false;
+        els.productInfo.innerHTML = `Ürün: <b class="err">Kontrol edilemedi</b>`;
+        els.productHint.innerHTML = `<span class="err">API erişimi başarısız.</span>`;
+      }
+
+      updateSaveButtonState();
+    }
+
+    function escapeHtml(s) {
+      return String(s || "").replace(/[&<>"']/g, m => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
+      }[m]));
+    }
+
+    // Barcode scanner
+    const codeReader = new ZXing.BrowserBarcodeReader();
+
+    codeReader.decodeFromVideoDevice(null, els.video, (result, err) => {
       if (result) {
-        barcodeInput.value = result.text;
-        navigator.vibrate?.(200);
+        const bc = String(result.text || "").trim();
+        if (!bc || bc === lastBarcode) return; // aynı barkodu spamlamasın
+        lastBarcode = bc;
+
+        els.barcode.value = bc;
+        navigator.vibrate?.(100);
+
+        setResult("");
+        fetchProduct(bc);
+        updateSaveButtonState();
       }
     });
 
+    // UI change listeners
+    els.locationSelect.addEventListener("change", updateSaveButtonState);
+    els.qty.addEventListener("input", updateSaveButtonState);
+
     async function send() {
+      updateSaveButtonState();
+      if (els.saveBtn.disabled) return;
+
+      els.saveBtn.disabled = true;
+      setResult("<span class='muted'>Kaydediliyor...</span>");
+
       const payload = {
-        action: document.getElementById("action").value,
-        movementType: document.getElementById("movementType").value,
-        barcode: barcodeInput.value,
-        qty: Number(document.getElementById("qty").value),
-        location: document.getElementById("location").value.trim().toUpperCase(),
+        action: els.action.value,
+        movementType: els.movementType.value,
+        barcode: els.barcode.value.trim(),
+        qty: Number(els.qty.value),
+        location: normLoc(els.locationSelect.value),
+        refNo: els.refNo.value.trim(),
+        channel: els.channel.value.trim(),
+        note: "",
         token: API_TOKEN
       };
 
       try {
         const res = await fetch(API_URL, {
           method: "POST",
-          body: JSON.stringify(payload)   // <-- header YOK!
+          body: JSON.stringify(payload) // header yok => CORS preflight yok
         });
 
         let json = null;
-        try { json = await res.json(); } catch (e) { }
+        try { json = await res.json(); } catch (_) { }
 
         if (json && json.ok) {
-          result.innerHTML = "<span class='ok'>✔ Kaydedildi</span>";
+          setResult("<span class='ok'>✔ Kaydedildi</span>");
+          // hızlı kullanım: qty tekrar 1 olsun
+          els.qty.value = 1;
         } else if (json && json.error === "Insufficient stock") {
-          const d = json.details;
-          result.innerHTML = `<span class='err'>❌ Yetersiz stok! Mevcut: ${d.available} | İstenen: ${d.requested} | Lokasyon: ${d.location}</span>`;
+          const d = json.details || {};
+          setResult(`<span class='err'>❌ Yetersiz stok! Mevcut: ${d.available} | İstenen: ${d.requested} | Lokasyon: ${escapeHtml(d.location)}</span>`);
+        } else if (json && json.error === "ProductNotFound") {
+          setResult("<span class='err'>❌ Ürün tanımlı değil (Products)</span>");
+          productOk = false;
+        } else if (json && json.error) {
+          setResult(`<span class='err'>❌ Hata: ${escapeHtml(json.error)}</span>`);
         } else {
-          result.innerHTML = "<span class='err'>❌ Kaydedilemedi</span>";
+          setResult("<span class='err'>❌ Kaydedilemedi</span>");
         }
-
       } catch (e) {
-        document.getElementById("result").innerHTML =
-          "<span class='err'>❌ Bağlantı hatası</span>";
+        setResult("<span class='err'>❌ Bağlantı hatası</span>");
+      } finally {
+        updateSaveButtonState();
       }
     }
 
+    // Init
+    loadLocations().then(updateSaveButtonState);
   </script>
 
 </body>
