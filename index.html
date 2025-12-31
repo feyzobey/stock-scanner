@@ -94,16 +94,17 @@
           body: JSON.stringify(payload)   // <-- header YOK!
         });
 
-        // CORS yüzünden bazen json okuyamayabilir; optimistik gösterelim
-        let ok = true;
-        try {
-          const json = await res.json();
-          ok = !!json.ok;
-        } catch (_) { }
+        let json = null;
+        try { json = await res.json(); } catch (e) { }
 
-        document.getElementById("result").innerHTML =
-          ok ? "<span class='ok'>✔ Kaydedildi</span>" :
-            "<span class='err'>❌ Kaydedilemedi</span>";
+        if (json && json.ok) {
+          result.innerHTML = "<span class='ok'>✔ Kaydedildi</span>";
+        } else if (json && json.error === "Insufficient stock") {
+          const d = json.details;
+          result.innerHTML = `<span class='err'>❌ Yetersiz stok! Mevcut: ${d.available} | İstenen: ${d.requested} | Lokasyon: ${d.location}</span>`;
+        } else {
+          result.innerHTML = "<span class='err'>❌ Kaydedilemedi</span>";
+        }
 
       } catch (e) {
         document.getElementById("result").innerHTML =
